@@ -14,14 +14,16 @@ export interface FreepikVideoRequest {
 
 export interface FreepikVideoResponse {
   data: [{
-    id: string;
+    id?: string;
+    task_id?: string;
     status: string;
   }];
 }
 
 export interface FreepikStatusResponse {
   data: [{
-    id: string;
+    id?: string;
+    task_id?: string;
     status: string;
     generated?: string;
     generated_files?: string[];
@@ -60,9 +62,12 @@ export class FreepikAPI {
         }
       );
 
-      if (response.data?.data?.[0]?.id) {
-        console.log('Successfully created Freepik task:', response.data.data[0].id);
-        return response.data.data[0].id;
+      const taskData = response.data?.data?.[0];
+      const taskId = taskData?.task_id || taskData?.id;
+
+      if (taskId) {
+        console.log('Successfully created Freepik task:', taskId);
+        return taskId;
       } else {
         throw new Error('Invalid response from Freepik API');
       }

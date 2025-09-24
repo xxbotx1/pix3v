@@ -1,18 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ArrowRight } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 import ImageUpload from '@/components/ImageUpload';
 import TransitionPrompt from '@/components/TransitionPrompt';
 import VideoOptions from '@/components/VideoOptions';
 import GenerateButton from '@/components/GenerateButton';
 import GenerationProgress, { GenerationStep } from '@/components/GenerationProgress';
 import GeneratedVideos, { GeneratedVideo } from '@/components/GeneratedVideos';
+import { api, APIError, statusToGeneratedVideo } from '@/lib/api';
 import exampleImage from '@assets/generated_images/Renaissance_reading_portrait_f743189a.png';
 
 export default function Home() {
+  const { toast } = useToast();
+  
   // Image upload state
   const [firstImage, setFirstImage] = useState<File | null>(null);
   const [lastImage, setLastImage] = useState<File | null>(null);
-  const [firstImageUrl, setFirstImageUrl] = useState<string>(exampleImage);
+  const [firstImageUrl, setFirstImageUrl] = useState<string>('');
   const [lastImageUrl, setLastImageUrl] = useState<string>('');
   
   // Form state
@@ -23,32 +27,19 @@ export default function Home() {
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
+  const [taskIds, setTaskIds] = useState<string[]>([]);
   const [generatedVideos, setGeneratedVideos] = useState<GeneratedVideo[]>([]);
-  
-  // todo: remove mock functionality
-  const [progressSteps] = useState<GenerationStep[]>([
-    {
-      id: 'uploading',
-      title: 'Uploading Images',
-      status: 'completed'
-    },
-    {
-      id: 'preparing',
-      title: 'Preparing your images',
-      status: 'completed'
-    },
-    {
-      id: 'generating',
-      title: 'Generating Videos',
-      status: 'in_progress',
-      progress: 67
-    },
-    {
-      id: 'completed',
-      title: 'Videos are ready!',
-      status: 'pending'
-    }
-  ]);
+  const [progressSteps, setProgressSteps] = useState<GenerationStep[]>([]);
+  const [overallProgress, setOverallProgress] = useState(0);
+  const pollIntervalRef = useRef<number | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
+
+  // Helper function to convert asset URL to File
+  const urlToFile = async (url: string, filename: string): Promise<File> => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new File([blob], filename, { type: blob.type });
+  };
 
   const handleFirstImageChange = (file: File | null) => {
     setFirstImage(file);
@@ -69,34 +60,174 @@ export default function Home() {
       setLastImageUrl('');
     }
   };
+  
+  // Load example image as default for first image
+  useEffect(() => {
+    const loadExampleImage = async () => {
+      try {
+        const exampleFile = await urlToFile(exampleImage, 'example-image.png');
+        setFirstImage(exampleFile);
+        setFirstImageUrl(URL.createObjectURL(exampleFile));
+      } catch (error) {
+        console.warn('Failed to load example image:', error);
+      }
+    };
+    
+    loadExampleImage();
+  }, []);
 
-  const handleGenerate = () => {
-    console.log('Generate videos triggered', {
-      hasFirstImage: !!firstImageUrl,
-      hasLastImage: !!lastImageUrl,
-      prompt,
-      videoCount,
-      quality
-    });
-    
-    setIsGenerating(true);
-    setShowProgress(true);
-    
-    // todo: remove mock functionality - simulate generation process
-    setTimeout(() => {
+  const handleGenerate = async () => {
+    try {
+      setIsGenerating(true);
+      setShowProgress(true);
+      setGeneratedVideos([]);
+      
+      // Initialize progress steps
+      const initialSteps: GenerationStep[] = [
+        { id: 'uploading', title: 'Uploading Images', status: 'in_progress' },
+        { id: 'preparing', title: 'Preparing your images', status: 'pending' },
+        { id: 'generating', title: 'Generating Videos', status: 'pending' },
+        { id: 'completed', title: 'Videos are ready!', status: 'pending' }
+      ];
+      setProgressSteps(initialSteps);
+      setOverallProgress(10);
+
+      // Step 1: Always upload both images to ensure they're accessible to Freepik
+      if (!firstImage || !lastImage) {
+        throw new Error('Please upload both first and last images');
+      }
+      
+      const uploadResult = await api.uploadImages([firstImage, lastImage]);
+      const finalFirstImageUrl = uploadResult.firstImageUrl;
+      const finalLastImageUrl = uploadResult.lastImageUrl;
+      
+      // Update progress: Upload complete
+      setProgressSteps(prev => prev.map(step => 
+        step.id === 'uploading' 
+          ? { ...step, status: 'completed' }
+          : step.id === 'preparing'
+          ? { ...step, status: 'in_progress' }
+          : step
+      ));
+      setOverallProgress(25);
+
+      // Step 2: Generate videos
+      const generateResult = await api.generateVideos({
+        prompt,
+        videoCount,
+        quality,
+        firstImageUrl: finalFirstImageUrl,
+        lastImageUrl: finalLastImageUrl,
+      });
+      
+      setTaskIds(generateResult.taskIds);
+      
+      // Update progress: Generation started
+      setProgressSteps(prev => prev.map(step => 
+        step.id === 'preparing' 
+          ? { ...step, status: 'completed' }
+          : step.id === 'generating'
+          ? { ...step, status: 'in_progress', progress: 0 }
+          : step
+      ));
+      setOverallProgress(40);
+      
+      // Start polling for status
+      startPollingStatus(generateResult.taskIds);
+      
+      toast({
+        title: "Videos are being generated!",
+        description: `Started generating ${videoCount} videos. This may take a few minutes.`,
+      });
+      
+    } catch (error) {
+      console.error('Generation failed:', error);
       setIsGenerating(false);
-      const mockVideos: GeneratedVideo[] = Array.from({ length: videoCount }, (_, i) => ({
-        id: `video-${i + 1}`,
-        title: `Video ${i + 1}`,
-        videoUrl: '#',
-        status: 'completed',
-        duration: quality === '1080p' ? '5.0s' : '8.0s',
-        fileSize: quality === '1080p' ? '15.2MB' : '12.8MB',
-        taskId: `task_${Math.random().toString(36).substr(2, 9)}`
-      }));
-      setGeneratedVideos(mockVideos);
-    }, 3000);
+      setShowProgress(false);
+      
+      const errorMessage = error instanceof APIError 
+        ? error.message 
+        : 'Failed to generate videos';
+        
+      toast({
+        title: "Generation failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    }
   };
+  
+  const startPollingStatus = (taskIds: string[]) => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+    }
+    
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const result = await api.checkBatchStatus(taskIds);
+        const statuses = result.statuses;
+        
+        const completedCount = statuses.filter(s => s.status === 'completed' || s.status === 'failed').length;
+        const totalCount = statuses.length;
+        const progressPercent = Math.floor((completedCount / totalCount) * 60) + 40;
+        
+        setOverallProgress(progressPercent);
+        
+        // Update generation progress
+        if (completedCount > 0) {
+          setProgressSteps(prev => prev.map(step => 
+            step.id === 'generating'
+              ? { ...step, progress: Math.floor((completedCount / totalCount) * 100) }
+              : step
+          ));
+        }
+        
+        // Check if all are complete
+        if (completedCount === totalCount) {
+          const videos: GeneratedVideo[] = statuses
+            .map((status, index) => statusToGeneratedVideo(status, index))
+            .filter((video): video is GeneratedVideo => video !== null);
+          
+          setGeneratedVideos(videos);
+          setIsGenerating(false);
+          setOverallProgress(100);
+          
+          setProgressSteps(prev => prev.map(step => 
+            step.id === 'generating'
+              ? { ...step, status: 'completed', progress: 100 }
+              : step.id === 'completed'
+              ? { ...step, status: 'completed' }
+              : step
+          ));
+          
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+          }
+          
+          const successCount = videos.filter(v => v.status === 'completed').length;
+          toast({
+            title: "Videos generated!",
+            description: `Successfully generated ${successCount} out of ${totalCount} videos.`,
+          });
+        }
+      } catch (error) {
+        console.error('Status polling error:', error);
+      }
+    }, 3000); // Poll every 3 seconds
+  };
+  
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+      if (pollTimeoutRef.current) {
+        clearTimeout(pollTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handlePlayVideo = (videoId: string) => {
     console.log(`Play video: ${videoId}`);
@@ -106,7 +237,7 @@ export default function Home() {
     console.log(`Download video: ${videoId}`);
   };
 
-  const canGenerate = firstImageUrl && lastImageUrl && prompt.trim();
+  const canGenerate = firstImage && lastImage && prompt.trim() && !isGenerating;
 
   return (
     <div className="min-h-screen bg-background">
@@ -166,7 +297,7 @@ export default function Home() {
           {showProgress && (
             <GenerationProgress
               steps={progressSteps}
-              overallProgress={67}
+              overallProgress={overallProgress}
             />
           )}
 

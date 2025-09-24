@@ -1,37 +1,39 @@
-import { type User, type InsertUser } from "@shared/schema";
+import { type VideoStatus } from "@shared/schema";
 import { randomUUID } from "crypto";
 
-// modify the interface with any CRUD methods
-// you might need
-
+// Storage interface for video generation tasks
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  // Video generation task management
+  saveVideoTask(taskId: string, status: VideoStatus): Promise<void>;
+  getVideoTask(taskId: string): Promise<VideoStatus | undefined>;
+  updateVideoTask(taskId: string, updates: Partial<VideoStatus>): Promise<void>;
+  getAllVideoTasks(): Promise<VideoStatus[]>;
 }
 
 export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+  private videoTasks: Map<string, VideoStatus>;
 
   constructor() {
-    this.users = new Map();
+    this.videoTasks = new Map();
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async saveVideoTask(taskId: string, status: VideoStatus): Promise<void> {
+    this.videoTasks.set(taskId, status);
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async getVideoTask(taskId: string): Promise<VideoStatus | undefined> {
+    return this.videoTasks.get(taskId);
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async updateVideoTask(taskId: string, updates: Partial<VideoStatus>): Promise<void> {
+    const existing = this.videoTasks.get(taskId);
+    if (existing) {
+      this.videoTasks.set(taskId, { ...existing, ...updates });
+    }
+  }
+
+  async getAllVideoTasks(): Promise<VideoStatus[]> {
+    return Array.from(this.videoTasks.values());
   }
 }
 

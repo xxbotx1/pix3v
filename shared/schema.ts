@@ -1,18 +1,39 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+// Video generation schemas
+export const videoGenerationRequestSchema = z.object({
+  prompt: z.string().min(1, "Prompt is required"),
+  videoCount: z.number().min(1).max(3),
+  quality: z.enum(["720p", "1080p"]),
+  firstImageUrl: z.string().url(),
+  lastImageUrl: z.string().url(),
 });
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
+export const videoGenerationResponseSchema = z.object({
+  taskIds: z.array(z.string()),
+  status: z.string(),
 });
 
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+export const videoStatusSchema = z.object({
+  taskId: z.string(),
+  status: z.enum(["pending", "processing", "completed", "failed"]),
+  progress: z.number().optional(),
+  videoUrl: z.string().optional(),
+  error: z.string().optional(),
+});
+
+export const generatedVideoSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  videoUrl: z.string(),
+  thumbnailUrl: z.string().optional(),
+  status: z.enum(["completed", "failed"]),
+  duration: z.string(),
+  fileSize: z.string(),
+  taskId: z.string(),
+});
+
+export type VideoGenerationRequest = z.infer<typeof videoGenerationRequestSchema>;
+export type VideoGenerationResponse = z.infer<typeof videoGenerationResponseSchema>;
+export type VideoStatus = z.infer<typeof videoStatusSchema>;
+export type GeneratedVideo = z.infer<typeof generatedVideoSchema>;

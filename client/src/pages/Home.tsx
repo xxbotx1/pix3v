@@ -158,11 +158,33 @@ export default function Home() {
   };
   
   const startPollingStatus = (taskIds: string[]) => {
+    // Clear any existing intervals
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
     }
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+    }
     
-    pollIntervalRef.current = setInterval(async () => {
+    let retryCount = 0;
+    const maxRetries = 3;
+    const maxDuration = 10 * 60 * 1000; // 10 minutes timeout
+    
+    // Set overall timeout
+    pollTimeoutRef.current = window.setTimeout(() => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      setIsGenerating(false);
+      toast({
+        title: "Generation timeout",
+        description: "Video generation is taking longer than expected. Please try again.",
+        variant: "destructive",
+      });
+    }, maxDuration) as number;
+    
+    pollIntervalRef.current = window.setInterval(async () => {
       try {
         const result = await api.checkBatchStatus(taskIds);
         const statuses = result.statuses;

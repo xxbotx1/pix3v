@@ -18,10 +18,10 @@ if (!existsSync(uploadsDir)) {
 // Configure multer for image uploads with disk storage
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (req: Request, file: Express.Multer.File, cb: multer.DiskStorageCallback) => {
+    destination: (req: Request, file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => {
       cb(null, uploadsDir);
     },
-    filename: (req: Request, file: Express.Multer.File, cb: multer.DiskStorageCallback) => {
+    filename: (req: Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) => {
       const safeExt = extname(file.originalname).toLowerCase();
       const uniqueName = `${randomUUID()}${safeExt}`;
       cb(null, uniqueName);
